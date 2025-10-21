@@ -6,9 +6,10 @@ import { verifyToken } from "@/lib/jwt";
 // GET single customer by ID
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const token = req.headers.get("authorization")?.split(" ")[1];
 
     if (!token) {
@@ -23,7 +24,7 @@ export async function GET(
     await connectDB();
 
     const customer = await Customer.findOne({
-      _id: params.id,
+      _id: id,
       userId: decoded.userId,
     }).lean();
 

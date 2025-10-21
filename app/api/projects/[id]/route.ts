@@ -7,9 +7,10 @@ import { verifyToken } from "@/lib/jwt";
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id: projectId } = await params;
     // Verify JWT token
     const authHeader = request.headers.get("authorization");
     if (!authHeader) {
@@ -24,8 +25,6 @@ export async function GET(
     }
 
     await connectDB();
-
-    const projectId = params.id;
 
     // Fetch project with customer details
     const project = await Project.findById(projectId).populate("customerId");
@@ -68,9 +67,10 @@ export async function GET(
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id: projectId } = await params;
     // Verify JWT token
     const authHeader = request.headers.get("authorization");
     if (!authHeader) {
@@ -86,7 +86,6 @@ export async function PATCH(
 
     await connectDB();
 
-    const projectId = params.id;
     const body = await request.json();
 
     const project = await Project.findByIdAndUpdate(
@@ -111,7 +110,7 @@ export async function PATCH(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     // Verify JWT token
@@ -129,7 +128,7 @@ export async function DELETE(
 
     await connectDB();
 
-    const projectId = params.id;
+    const { id: projectId } = await params;
 
     // Delete all windows in rooms for this project
     const rooms = await Room.find({ projectId });
