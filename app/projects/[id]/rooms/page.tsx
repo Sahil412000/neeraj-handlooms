@@ -20,6 +20,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
 import {
   Dialog,
   DialogContent,
@@ -51,6 +52,10 @@ interface Window {
   width: number;
   height: number;
   pannaCount: number;
+  meters: number;
+  fabricCostPerMeter: number;
+  trackCount: number;
+  hookCount: number;
 }
 
 interface Project {
@@ -89,12 +94,24 @@ export default function RoomManagementPage() {
     width: "",
     height: "",
     pannaCount: 0,
+    meters: 0,
+    fabricCostPerMeter: "",
+    trackCount: 1,
+    hookCount: "",
   });
 
   // Auto-calculate panna count based on width (1 panna per 20 inches)
   const calculatePannaCount = (width: string) => {
     if (!width || parseFloat(width) <= 0) return 0;
     return Math.ceil(parseFloat(width) / 20);
+  };
+
+  // Calculate meters based on formula: (width + height) / 24
+  const calculateMeters = (width: string, height: string) => {
+    if (!width || !height || parseFloat(width) <= 0 || parseFloat(height) <= 0)
+      return 0;
+    const meters = (parseFloat(width) + parseFloat(height)) / 24;
+    return Math.round(meters * 100) / 100; // Round to 2 decimal places
   };
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -107,6 +124,18 @@ export default function RoomManagementPage() {
     setIsLoading(true);
     try {
       const token = localStorage.getItem("token");
+
+      // Fetch project details
+      const projectResponse = await fetch(`/api/projects/${projectId}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (projectResponse.ok) {
+        const projectData = await projectResponse.json();
+        setProject(projectData.project);
+      }
 
       // Fetch rooms
       const roomsResponse = await fetch(`/api/rooms?projectId=${projectId}`, {
@@ -204,6 +233,9 @@ export default function RoomManagementPage() {
     if (!windowForm.style.trim()) newErrors.style = "Style is required";
     if (!windowForm.width) newErrors.width = "Width is required";
     if (!windowForm.height) newErrors.height = "Height is required";
+    if (!windowForm.fabricCostPerMeter)
+      newErrors.fabricCostPerMeter = "Fabric cost per meter is required";
+    if (!windowForm.hookCount) newErrors.hookCount = "Hook count is required";
 
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
@@ -214,8 +246,9 @@ export default function RoomManagementPage() {
     try {
       const token = localStorage.getItem("token");
 
-      // Calculate panna count
+      // Calculate values
       const pannaCount = calculatePannaCount(windowForm.width);
+      const meters = calculateMeters(windowForm.width, windowForm.height);
       const windowNumber = (windows[selectedRoomId!]?.length || 0) + 1;
 
       const response = await fetch("/api/windows", {
@@ -232,6 +265,10 @@ export default function RoomManagementPage() {
           width: parseFloat(windowForm.width),
           height: parseFloat(windowForm.height),
           pannaCount,
+          meters,
+          fabricCostPerMeter: parseFloat(windowForm.fabricCostPerMeter),
+          trackCount: windowForm.trackCount,
+          hookCount: parseInt(windowForm.hookCount),
         }),
       });
 
@@ -248,6 +285,10 @@ export default function RoomManagementPage() {
           width: "",
           height: "",
           pannaCount: 0,
+          meters: 0,
+          fabricCostPerMeter: "",
+          trackCount: 1,
+          hookCount: "",
         });
         setErrors({});
 
@@ -268,6 +309,64 @@ export default function RoomManagementPage() {
   const openAddWindowDialog = (roomId: string) => {
     setSelectedRoomId(roomId);
     setShowWindowDialog(true);
+  };
+
+  // Calculate individual window cost
+  const calculateWindowCost = (window: Window) => {
+    if (!project) return 0;
+
+    const fabricCost = (window.meters || 0) * (window.fabricCostPerMeter || 0);
+    const trackCost =
+      (window.trackCount || 0) * (project.defaultTrackRate || 0);
+    const makingCost =
+      (window.pannaCount || 0) * (project.defaultMakingRate || 0);
+    const fittingCost =
+      (window.pannaCount || 0) * (project.defaultFittingRate || 0);
+    const hookCost = (window.hookCount || 0) * (project.defaultHookRate || 0);
+
+    return fabricCost + trackCost + makingCost + fittingCost + hookCost;
+  };
+
+  // Calculate project totals
+  const calculateProjectTotals = () => {
+    if (!project) return null;
+
+    let totalMeters = 0;
+    let totalPannas = 0;
+    let totalTracks = 0;
+    let totalHooks = 0;
+    let fabricCost = 0;
+
+    // Sum up all windows data
+    Object.values(windows).forEach((roomWindows) => {
+      roomWindows.forEach((window) => {
+        totalMeters += window.meters || 0;
+        totalPannas += window.pannaCount || 0;
+        totalTracks += window.trackCount || 0;
+        totalHooks += window.hookCount || 0;
+        fabricCost += (window.meters || 0) * (window.fabricCostPerMeter || 0);
+      });
+    });
+
+    const trackCost = totalTracks * (project.defaultTrackRate || 0);
+    const makingCost = totalPannas * (project.defaultMakingRate || 0);
+    const fittingCost = totalPannas * (project.defaultFittingRate || 0);
+    const hookCost = totalHooks * (project.defaultHookRate || 0);
+    const totalAmount =
+      fabricCost + trackCost + makingCost + fittingCost + hookCost;
+
+    return {
+      totalMeters: totalMeters.toFixed(2),
+      totalPannas,
+      totalTracks,
+      totalHooks,
+      fabricCost: fabricCost.toFixed(2),
+      trackCost: trackCost.toFixed(2),
+      makingCost: makingCost.toFixed(2),
+      fittingCost: fittingCost.toFixed(2),
+      hookCost: hookCost.toFixed(2),
+      totalAmount: totalAmount.toFixed(2),
+    };
   };
 
   if (isLoading) {
@@ -303,12 +402,8 @@ export default function RoomManagementPage() {
               </p>
             </div>
             <div className="text-right">
-              <div className="text-sm text-muted-foreground">
-                Total Rooms
-              </div>
-              <div className="text-2xl font-bold">
-                {rooms.length}
-              </div>
+              <div className="text-sm text-muted-foreground">Total Rooms</div>
+              <div className="text-2xl font-bold">{rooms.length}</div>
             </div>
           </div>
         </div>
@@ -444,24 +539,117 @@ export default function RoomManagementPage() {
                       <div className="overflow-x-auto">
                         <table className="w-full text-sm">
                           <thead>
-                            <tr className="border-b">
+                            <tr className="border-b bg-muted/50">
                               <th className="text-left p-2">#</th>
                               <th className="text-left p-2">Style</th>
-                              <th className="text-left p-2">Width (in)</th>
-                              <th className="text-left p-2">Height (in)</th>
+                              <th className="text-left p-2">Width</th>
+                              <th className="text-left p-2">Height</th>
                               <th className="text-left p-2">Panna</th>
+                              <th className="text-left p-2">Meters</th>
+                              <th className="text-left p-2">Fabric/m</th>
+                              <th className="text-left p-2">Tracks</th>
+                              <th className="text-left p-2">Hooks</th>
+                              <th className="text-right p-2 font-semibold">
+                                Window Cost
+                              </th>
                             </tr>
                           </thead>
                           <tbody>
-                            {windows[room._id].map((window) => (
-                              <tr key={window._id} className="border-b">
-                                <td className="p-2">{window.windowNumber}</td>
-                                <td className="p-2">{window.style}</td>
-                                <td className="p-2">{window.width}"</td>
-                                <td className="p-2">{window.height}"</td>
-                                <td className="p-2">{window.pannaCount}</td>
-                              </tr>
-                            ))}
+                            {windows[room._id].map((window) => {
+                              const windowCost = calculateWindowCost(window);
+                              const fabricCost =
+                                (window.meters || 0) *
+                                (window.fabricCostPerMeter || 0);
+                              const trackCost =
+                                (window.trackCount || 0) *
+                                (project?.defaultTrackRate || 0);
+                              const makingCost =
+                                (window.pannaCount || 0) *
+                                (project?.defaultMakingRate || 0);
+                              const fittingCost =
+                                (window.pannaCount || 0) *
+                                (project?.defaultFittingRate || 0);
+                              const hookCost =
+                                (window.hookCount || 0) *
+                                (project?.defaultHookRate || 0);
+
+                              return (
+                                <tr
+                                  key={window._id}
+                                  className="border-b hover:bg-muted/30 transition-colors"
+                                >
+                                  <td className="p-2">{window.windowNumber}</td>
+                                  <td className="p-2">{window.style}</td>
+                                  <td className="p-2">{window.width}"</td>
+                                  <td className="p-2">{window.height}"</td>
+                                  <td className="p-2">{window.pannaCount}</td>
+                                  <td className="p-2">{window.meters}</td>
+                                  <td className="p-2">
+                                    ₹{window.fabricCostPerMeter}
+                                  </td>
+                                  <td className="p-2">{window.trackCount}</td>
+                                  <td className="p-2">{window.hookCount}</td>
+                                  <td className="p-2 text-right">
+                                    <div className="text-xs text-muted-foreground space-y-0.5">
+                                      <div>
+                                        Fabric: ₹{fabricCost.toFixed(2)}{" "}
+                                        <span className="text-[10px]">
+                                          ({window.meters}m × ₹
+                                          {window.fabricCostPerMeter}/m)
+                                        </span>
+                                      </div>
+                                      <div>
+                                        Track: ₹{trackCost.toFixed(2)}{" "}
+                                        <span className="text-[10px]">
+                                          ({window.trackCount} × ₹
+                                          {project?.defaultTrackRate})
+                                        </span>
+                                      </div>
+                                      <div>
+                                        Making: ₹{makingCost.toFixed(2)}{" "}
+                                        <span className="text-[10px]">
+                                          ({window.pannaCount} × ₹
+                                          {project?.defaultMakingRate})
+                                        </span>
+                                      </div>
+                                      <div>
+                                        Fitting: ₹{fittingCost.toFixed(2)}{" "}
+                                        <span className="text-[10px]">
+                                          ({window.pannaCount} × ₹
+                                          {project?.defaultFittingRate})
+                                        </span>
+                                      </div>
+                                      <div>
+                                        Hook: ₹{hookCost.toFixed(2)}{" "}
+                                        <span className="text-[10px]">
+                                          ({window.hookCount} × ₹
+                                          {project?.defaultHookRate})
+                                        </span>
+                                      </div>
+                                      <div className="border-t pt-1 mt-1 font-bold text-green-600 text-sm">
+                                        Total: ₹{windowCost.toFixed(2)}
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                            {/* Room Total Row */}
+                            <tr className="border-t-2 bg-blue-50 font-semibold">
+                              <td colSpan={9} className="p-2 text-right">
+                                Room Total:
+                              </td>
+                              <td className="p-2 text-right text-blue-600 font-bold">
+                                ₹
+                                {windows[room._id]
+                                  .reduce(
+                                    (sum, window) =>
+                                      sum + calculateWindowCost(window),
+                                    0
+                                  )
+                                  .toFixed(2)}
+                              </td>
+                            </tr>
                           </tbody>
                         </table>
                       </div>
@@ -518,10 +706,12 @@ export default function RoomManagementPage() {
                     value={windowForm.width}
                     onChange={(e) => {
                       const newWidth = e.target.value;
+                      const newHeight = windowForm.height;
                       setWindowForm({
                         ...windowForm,
                         width: newWidth,
                         pannaCount: calculatePannaCount(newWidth),
+                        meters: calculateMeters(newWidth, newHeight),
                       });
                     }}
                     placeholder="146"
@@ -530,7 +720,6 @@ export default function RoomManagementPage() {
                     <p className="text-sm text-destructive">{errors.width}</p>
                   )}
                 </div>
-
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -541,9 +730,15 @@ export default function RoomManagementPage() {
                     type="number"
                     step="0.1"
                     value={windowForm.height}
-                    onChange={(e) =>
-                      setWindowForm({ ...windowForm, height: e.target.value })
-                    }
+                    onChange={(e) => {
+                      const newHeight = e.target.value;
+                      const newWidth = windowForm.width;
+                      setWindowForm({
+                        ...windowForm,
+                        height: newHeight,
+                        meters: calculateMeters(newWidth, newHeight),
+                      });
+                    }}
                     placeholder="90"
                   />
                   {errors.height && (
@@ -567,6 +762,87 @@ export default function RoomManagementPage() {
                 </div>
               </div>
 
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="meters">Meters (Auto)</Label>
+                  <Input
+                    id="meters"
+                    type="number"
+                    step="0.01"
+                    value={windowForm.meters}
+                    readOnly
+                    className="bg-muted"
+                    placeholder="Auto-calculated"
+                  />
+                  <p className="text-xs text-muted-foreground">(W+H) / 24</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="fabricCostPerMeter">
+                    Fabric Cost/Meter (₹) *
+                  </Label>
+                  <Input
+                    id="fabricCostPerMeter"
+                    type="number"
+                    step="0.01"
+                    value={windowForm.fabricCostPerMeter}
+                    onChange={(e) =>
+                      setWindowForm({
+                        ...windowForm,
+                        fabricCostPerMeter: e.target.value,
+                      })
+                    }
+                    placeholder="500"
+                  />
+                  {errors.fabricCostPerMeter && (
+                    <p className="text-sm text-destructive">
+                      {errors.fabricCostPerMeter}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="trackCount">Track Count</Label>
+                  <Input
+                    id="trackCount"
+                    type="number"
+                    min="1"
+                    value={windowForm.trackCount}
+                    onChange={(e) =>
+                      setWindowForm({
+                        ...windowForm,
+                        trackCount: parseInt(e.target.value) || 1,
+                      })
+                    }
+                    placeholder="1"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="hookCount">Hook Count *</Label>
+                  <Input
+                    id="hookCount"
+                    type="number"
+                    min="0"
+                    value={windowForm.hookCount}
+                    onChange={(e) =>
+                      setWindowForm({
+                        ...windowForm,
+                        hookCount: e.target.value,
+                      })
+                    }
+                    placeholder="20"
+                  />
+                  {errors.hookCount && (
+                    <p className="text-sm text-destructive">
+                      {errors.hookCount}
+                    </p>
+                  )}
+                </div>
+              </div>
+
               <div className="flex gap-2">
                 <Button
                   type="button"
@@ -587,6 +863,130 @@ export default function RoomManagementPage() {
             </form>
           </DialogContent>
         </Dialog>
+
+        {/* Total Calculations */}
+        {rooms.length > 0 &&
+          Object.keys(windows).some((roomId) => windows[roomId]?.length > 0) &&
+          project && (
+            <Card className="mt-8 bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-200">
+              <CardHeader>
+                <CardTitle className="text-2xl">Project Cost Summary</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {(() => {
+                  const totals = calculateProjectTotals();
+                  if (!totals) return null;
+
+                  return (
+                    <div className="space-y-6">
+                      {/* Summary Stats */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="bg-white rounded-lg p-4 shadow-sm">
+                          <div className="text-sm text-muted-foreground">
+                            Total Meters
+                          </div>
+                          <div className="text-2xl font-bold text-blue-600">
+                            {totals.totalMeters} m
+                          </div>
+                        </div>
+                        <div className="bg-white rounded-lg p-4 shadow-sm">
+                          <div className="text-sm text-muted-foreground">
+                            Total Pannas
+                          </div>
+                          <div className="text-2xl font-bold text-green-600">
+                            {totals.totalPannas}
+                          </div>
+                        </div>
+                        <div className="bg-white rounded-lg p-4 shadow-sm">
+                          <div className="text-sm text-muted-foreground">
+                            Total Tracks
+                          </div>
+                          <div className="text-2xl font-bold text-purple-600">
+                            {totals.totalTracks}
+                          </div>
+                        </div>
+                        <div className="bg-white rounded-lg p-4 shadow-sm">
+                          <div className="text-sm text-muted-foreground">
+                            Total Hooks
+                          </div>
+                          <div className="text-2xl font-bold text-orange-600">
+                            {totals.totalHooks}
+                          </div>
+                        </div>
+                      </div>
+
+                      <Separator />
+
+                      {/* Cost Breakdown */}
+                      <div className="space-y-3">
+                        <h3 className="font-semibold text-lg">
+                          Cost Breakdown
+                        </h3>
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-center p-3 bg-white rounded-lg">
+                            <span className="font-medium">
+                              Fabric Cost ({totals.totalMeters} m × avg rate)
+                            </span>
+                            <span className="text-lg font-semibold">
+                              ₹{totals.fabricCost}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center p-3 bg-white rounded-lg">
+                            <span className="font-medium">
+                              Track Cost ({totals.totalTracks} × ₹
+                              {project.defaultTrackRate})
+                            </span>
+                            <span className="text-lg font-semibold">
+                              ₹{totals.trackCost}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center p-3 bg-white rounded-lg">
+                            <span className="font-medium">
+                              Making Cost ({totals.totalPannas} × ₹
+                              {project.defaultMakingRate})
+                            </span>
+                            <span className="text-lg font-semibold">
+                              ₹{totals.makingCost}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center p-3 bg-white rounded-lg">
+                            <span className="font-medium">
+                              Fitting Cost ({totals.totalPannas} × ₹
+                              {project.defaultFittingRate})
+                            </span>
+                            <span className="text-lg font-semibold">
+                              ₹{totals.fittingCost}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center p-3 bg-white rounded-lg">
+                            <span className="font-medium">
+                              Hook Cost ({totals.totalHooks} × ₹
+                              {project.defaultHookRate})
+                            </span>
+                            <span className="text-lg font-semibold">
+                              ₹{totals.hookCost}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <Separator />
+
+                      {/* Total Amount */}
+                      <div className="flex justify-between items-center p-6 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg shadow-lg">
+                        <span className="text-2xl font-bold">
+                          Total Project Amount
+                        </span>
+                        <span className="text-3xl font-bold">
+                          ₹{totals.totalAmount}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </CardContent>
+            </Card>
+          )}
 
         {/* Action Buttons */}
         {rooms.length > 0 && (

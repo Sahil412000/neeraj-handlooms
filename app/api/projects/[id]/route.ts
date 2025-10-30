@@ -26,8 +26,11 @@ export async function GET(
 
     await connectDB();
 
-    // Fetch project with customer details
-    const project = await Project.findById(projectId).populate("customerId");
+    // Fetch project with customer details and populated references
+    const project = await Project.findById(projectId)
+      .populate("customerId")
+      .populate("salesPersonId")
+      .populate("tailorId");
 
     if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });

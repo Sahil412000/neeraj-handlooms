@@ -30,6 +30,10 @@ export async function POST(request: NextRequest) {
       height,
       width,
       pannaCount,
+      meters,
+      fabricCostPerMeter,
+      trackCount,
+      hookCount,
     } = body;
 
     // Validate room exists
@@ -47,6 +51,10 @@ export async function POST(request: NextRequest) {
       height: parseFloat(height.toString()),
       width: parseFloat(width.toString()),
       pannaCount,
+      meters: parseFloat(meters.toString()),
+      fabricCostPerMeter: parseFloat(fabricCostPerMeter.toString()),
+      trackCount: parseInt(trackCount.toString()),
+      hookCount: parseInt(hookCount.toString()),
     });
 
     return NextResponse.json({ window }, { status: 201 });

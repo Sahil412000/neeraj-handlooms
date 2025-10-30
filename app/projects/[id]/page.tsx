@@ -3,12 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 
@@ -19,20 +14,36 @@ interface Customer {
   address: string;
 }
 
+interface SalesPerson {
+  _id: string;
+  name: string;
+  territory?: string;
+}
+
+interface Tailor {
+  _id: string;
+  name: string;
+  specialization?: string;
+}
+
 interface Project {
   _id: string;
   quotationNumber: string;
   customerId: Customer;
   projectType: string;
-  salesPerson: string;
+  salesPersonId: SalesPerson;
   status: string;
   totalAmount: number;
   advanceAmount: number;
   balanceAmount: number;
-  tailorName?: string;
+  tailorId?: Tailor;
   probableDeliveryDate?: string;
   createdAt: string;
   updatedAt: string;
+  defaultMakingRate?: number;
+  defaultFittingRate?: number;
+  defaultTrackRate?: number;
+  defaultHookRate?: number;
 }
 
 interface Room {
@@ -50,6 +61,10 @@ interface Window {
   width: number;
   height: number;
   pannaCount: number;
+  meters: number;
+  fabricCostPerMeter: number;
+  trackCount: number;
+  hookCount: number;
 }
 
 export default function ProjectDetailPage() {
@@ -70,7 +85,7 @@ export default function ProjectDetailPage() {
     setIsLoading(true);
     try {
       const token = localStorage.getItem("token");
-      
+
       // Fetch project details
       const projectResponse = await fetch(`/api/projects/${projectId}`, {
         headers: {
@@ -82,7 +97,7 @@ export default function ProjectDetailPage() {
         const projectData = await projectResponse.json();
         setProject(projectData.project);
         setRooms(projectData.rooms || []);
-        
+
         // Set windows data
         const windowsData: { [roomId: string]: Window[] } = {};
         if (projectData.rooms) {
@@ -145,7 +160,144 @@ export default function ProjectDetailPage() {
   };
 
   const getTotalWindows = () => {
-    return Object.values(windows).reduce((total, roomWindows) => total + roomWindows.length, 0);
+    return Object.values(windows).reduce(
+      (total, roomWindows) => total + roomWindows.length,
+      0
+    );
+  };
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      maximumFractionDigits: 0,
+    }).format(amount);
+  };
+
+  // Calculate project cost breakdown
+  const calculateProjectCosts = () => {
+    if (!project) return null;
+
+    let totalMeters = 0;
+    let totalPannas = 0;
+    let totalTracks = 0;
+    let totalHooks = 0;
+    let fabricCost = 0;
+
+    // Sum up all windows data
+    Object.values(windows).forEach((roomWindows) => {
+      roomWindows.forEach((window) => {
+        totalMeters += window.meters || 0;
+        totalPannas += window.pannaCount || 0;
+        totalTracks += window.trackCount || 0;
+        totalHooks += window.hookCount || 0;
+        fabricCost += (window.meters || 0) * (window.fabricCostPerMeter || 0);
+      });
+    });
+
+    const trackCost = totalTracks * (project.defaultTrackRate || 0);
+    const makingCost = totalPannas * (project.defaultMakingRate || 0);
+    const fittingCost = totalPannas * (project.defaultFittingRate || 0);
+    const hookCost = totalHooks * (project.defaultHookRate || 0);
+    const totalAmount =
+      fabricCost + trackCost + makingCost + fittingCost + hookCost;
+
+    return {
+      totalMeters: totalMeters.toFixed(2),
+      totalPannas,
+      totalTracks,
+      totalHooks,
+      fabricCost: fabricCost.toFixed(2),
+      trackCost: trackCost.toFixed(2),
+      makingCost: makingCost.toFixed(2),
+      fittingCost: fittingCost.toFixed(2),
+      hookCost: hookCost.toFixed(2),
+      totalAmount: totalAmount.toFixed(2),
+    };
+  };
+
+  const generateWhatsAppMessage = () => {
+    if (!project) return "";
+
+    const costs = calculateProjectCosts();
+    const totalAmount = costs ? parseFloat(costs.totalAmount) : 0;
+
+    let message = `🏠 *Quotation Details - ${project.quotationNumber}*\n\n`;
+
+    // Customer Information
+    message += `👤 *Customer Information:*\n`;
+    message += `• Name: ${project.customerId?.name || "N/A"}\n`;
+    message += `• Contact: ${project.customerId?.contactNumber || "N/A"}\n`;
+    message += `• Address: ${project.customerId?.address || "N/A"}\n\n`;
+
+    // Project Details
+    message += `📋 *Project Details:*\n`;
+    message += `• Type: ${project.projectType}\n`;
+    message += `• Sales Person: ${project.salesPersonId?.name || "N/A"}\n`;
+    message += `• Tailor: ${project.tailorId?.name || "Not assigned"}\n`;
+    message += `• Status: ${getStatusLabel(project.status)}\n\n`;
+
+    // Rooms & Windows Summary
+    message += `🏠 *Rooms & Windows:*\n`;
+    message += `• Total Rooms: ${rooms.length}\n`;
+    message += `• Total Windows: ${getTotalWindows()}\n\n`;
+
+    if (rooms.length > 0) {
+      message += `📝 *Room Details:*\n`;
+      rooms.forEach((room, index) => {
+        const roomWindows = windows[room._id] || [];
+        message += `${index + 1}. ${room.roomType}\n`;
+        message += `   Windows: ${roomWindows.length}\n`;
+        if (room.notes) {
+          message += `   Notes: ${room.notes}\n`;
+        }
+        message += `\n`;
+      });
+    }
+
+    // Cost Breakdown
+    if (costs && totalAmount > 0) {
+      message += `💰 *Cost Breakdown:*\n`;
+      message += `• Fabric Cost: ${formatCurrency(
+        parseFloat(costs.fabricCost)
+      )}\n`;
+      message += `• Track Cost: ${formatCurrency(
+        parseFloat(costs.trackCost)
+      )}\n`;
+      message += `• Making Cost: ${formatCurrency(
+        parseFloat(costs.makingCost)
+      )}\n`;
+      message += `• Fitting Cost: ${formatCurrency(
+        parseFloat(costs.fittingCost)
+      )}\n`;
+      message += `• Hook Cost: ${formatCurrency(parseFloat(costs.hookCost))}\n`;
+      message += `\n*Total Amount: ${formatCurrency(totalAmount)}*\n\n`;
+    }
+
+    // Delivery Information
+    if (project.probableDeliveryDate) {
+      message += `📅 *Probable Delivery:* ${formatDate(
+        project.probableDeliveryDate
+      )}\n\n`;
+    }
+
+    message += `📞 *Contact Us:*\n`;
+    message += `For any queries or modifications, please contact us.\n\n`;
+    message += `Thank you for choosing our services! 🙏`;
+
+    return message;
+  };
+
+  const handleWhatsAppShare = () => {
+    const message = generateWhatsAppMessage();
+    const encodedMessage = encodeURIComponent(message);
+    const whatsappUrl = `https://wa.me/${project?.customerId?.contactNumber?.replace(
+      /^\+/,
+      ""
+    )}?text=${encodedMessage}`;
+
+    // Open WhatsApp in a new tab
+    window.open(whatsappUrl, "_blank");
   };
 
   if (isLoading) {
@@ -164,8 +316,12 @@ export default function ProjectDetailPage() {
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 py-8">
         <div className="max-w-6xl mx-auto px-4">
           <div className="text-center py-12">
-            <h1 className="text-2xl font-bold text-foreground mb-4">Project Not Found</h1>
-            <p className="text-muted-foreground mb-6">The project you're looking for doesn't exist.</p>
+            <h1 className="text-2xl font-bold text-foreground mb-4">
+              Project Not Found
+            </h1>
+            <p className="text-muted-foreground mb-6">
+              The project you're looking for doesn't exist.
+            </p>
             <Button onClick={() => router.push("/dashboard")}>
               Back to Dashboard
             </Button>
@@ -218,16 +374,28 @@ export default function ProjectDetailPage() {
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <h4 className="font-semibold text-sm text-muted-foreground">Customer Name</h4>
-                    <p className="text-lg">{project.customerId?.name || "N/A"}</p>
+                    <h4 className="font-semibold text-sm text-muted-foreground">
+                      Customer Name
+                    </h4>
+                    <p className="text-lg">
+                      {project.customerId?.name || "N/A"}
+                    </p>
                   </div>
                   <div>
-                    <h4 className="font-semibold text-sm text-muted-foreground">Contact Number</h4>
-                    <p className="text-lg">{project.customerId?.contactNumber || "N/A"}</p>
+                    <h4 className="font-semibold text-sm text-muted-foreground">
+                      Contact Number
+                    </h4>
+                    <p className="text-lg">
+                      {project.customerId?.contactNumber || "N/A"}
+                    </p>
                   </div>
                   <div className="md:col-span-2">
-                    <h4 className="font-semibold text-sm text-muted-foreground">Address</h4>
-                    <p className="text-lg">{project.customerId?.address || "N/A"}</p>
+                    <h4 className="font-semibold text-sm text-muted-foreground">
+                      Address
+                    </h4>
+                    <p className="text-lg">
+                      {project.customerId?.address || "N/A"}
+                    </p>
                   </div>
                 </div>
               </CardContent>
@@ -241,24 +409,35 @@ export default function ProjectDetailPage() {
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <h4 className="font-semibold text-sm text-muted-foreground">Sales Person</h4>
-                    <p className="text-lg">{project.salesPerson}</p>
-                  </div>
-                  <div>
-                    <h4 className="font-semibold text-sm text-muted-foreground">Tailor</h4>
-                    <p className="text-lg">{project.tailorName || "Not assigned"}</p>
-                  </div>
-                  <div>
-                    <h4 className="font-semibold text-sm text-muted-foreground">Probable Delivery</h4>
+                    <h4 className="font-semibold text-sm text-muted-foreground">
+                      Sales Person
+                    </h4>
                     <p className="text-lg">
-                      {project.probableDeliveryDate 
-                        ? formatDate(project.probableDeliveryDate)
-                        : "Not set"
-                      }
+                      {project.salesPersonId?.name || "N/A"}
                     </p>
                   </div>
                   <div>
-                    <h4 className="font-semibold text-sm text-muted-foreground">Last Updated</h4>
+                    <h4 className="font-semibold text-sm text-muted-foreground">
+                      Tailor
+                    </h4>
+                    <p className="text-lg">
+                      {project.tailorId?.name || "Not assigned"}
+                    </p>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-sm text-muted-foreground">
+                      Probable Delivery
+                    </h4>
+                    <p className="text-lg">
+                      {project.probableDeliveryDate
+                        ? formatDate(project.probableDeliveryDate)
+                        : "Not set"}
+                    </p>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-sm text-muted-foreground">
+                      Last Updated
+                    </h4>
                     <p className="text-lg">{formatDate(project.updatedAt)}</p>
                   </div>
                 </div>
@@ -281,8 +460,14 @@ export default function ProjectDetailPage() {
               <CardContent>
                 {rooms.length === 0 ? (
                   <div className="text-center py-8">
-                    <p className="text-muted-foreground mb-4">No rooms added yet</p>
-                    <Button onClick={() => router.push(`/projects/${projectId}/rooms`)}>
+                    <p className="text-muted-foreground mb-4">
+                      No rooms added yet
+                    </p>
+                    <Button
+                      onClick={() =>
+                        router.push(`/projects/${projectId}/rooms`)
+                      }
+                    >
                       Add First Room
                     </Button>
                   </div>
@@ -293,14 +478,18 @@ export default function ProjectDetailPage() {
                         <div className="flex justify-between items-start mb-2">
                           <div>
                             <h4 className="font-semibold">{room.roomName}</h4>
-                            <p className="text-sm text-muted-foreground">{room.roomType}</p>
+                            <p className="text-sm text-muted-foreground">
+                              {room.roomType}
+                            </p>
                           </div>
                           <Badge variant="secondary">
                             {windows[room._id]?.length || 0} windows
                           </Badge>
                         </div>
                         {room.notes && (
-                          <p className="text-sm text-muted-foreground mt-2">{room.notes}</p>
+                          <p className="text-sm text-muted-foreground mt-2">
+                            {room.notes}
+                          </p>
                         )}
                       </div>
                     ))}
@@ -312,50 +501,121 @@ export default function ProjectDetailPage() {
 
           {/* Sidebar */}
           <div className="space-y-6">
+            {/* Cost Breakdown */}
+            {(() => {
+              const costs = calculateProjectCosts();
+              if (!costs || getTotalWindows() === 0) return null;
+
+              return (
+                <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-200">
+                  <CardHeader>
+                    <CardTitle className="text-xl">
+                      Project Cost Summary
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    {/* Summary Stats - 2x2 Grid */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="bg-white rounded-lg p-4 shadow-sm">
+                        <div className="text-xs text-muted-foreground mb-1">
+                          Meters
+                        </div>
+                        <div className="text-2xl font-bold text-blue-600">
+                          {costs.totalMeters}m
+                        </div>
+                      </div>
+                      <div className="bg-white rounded-lg p-4 shadow-sm">
+                        <div className="text-xs text-muted-foreground mb-1">
+                          Pannas
+                        </div>
+                        <div className="text-2xl font-bold text-green-600">
+                          {costs.totalPannas}
+                        </div>
+                      </div>
+                      <div className="bg-white rounded-lg p-4 shadow-sm">
+                        <div className="text-xs text-muted-foreground mb-1">
+                          Tracks
+                        </div>
+                        <div className="text-2xl font-bold text-purple-600">
+                          {costs.totalTracks}
+                        </div>
+                      </div>
+                      <div className="bg-white rounded-lg p-4 shadow-sm">
+                        <div className="text-xs text-muted-foreground mb-1">
+                          Hooks
+                        </div>
+                        <div className="text-2xl font-bold text-orange-600">
+                          {costs.totalHooks}
+                        </div>
+                      </div>
+                    </div>
+
+                    <Separator />
+
+                    {/* Cost Details */}
+                    <div className="space-y-3">
+                      <div className="flex justify-between items-center p-2 bg-white/50 rounded">
+                        <span className="font-medium">Fabric Cost:</span>
+                        <span className="font-bold">₹{costs.fabricCost}</span>
+                      </div>
+                      <div className="flex justify-between items-center p-2 bg-white/50 rounded">
+                        <span className="font-medium">Track Cost:</span>
+                        <span className="font-bold">₹{costs.trackCost}</span>
+                      </div>
+                      <div className="flex justify-between items-center p-2 bg-white/50 rounded">
+                        <span className="font-medium">Making Cost:</span>
+                        <span className="font-bold">₹{costs.makingCost}</span>
+                      </div>
+                      <div className="flex justify-between items-center p-2 bg-white/50 rounded">
+                        <span className="font-medium">Fitting Cost:</span>
+                        <span className="font-bold">₹{costs.fittingCost}</span>
+                      </div>
+                      <div className="flex justify-between items-center p-2 bg-white/50 rounded">
+                        <span className="font-medium">Hook Cost:</span>
+                        <span className="font-bold">₹{costs.hookCost}</span>
+                      </div>
+                    </div>
+
+                    <Separator />
+
+                    {/* Total */}
+                    <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg p-6 shadow-lg">
+                      <div className="flex justify-between items-center">
+                        <span className="text-lg font-bold">Total Amount</span>
+                        <span className="text-3xl font-bold">
+                          ₹{costs.totalAmount}
+                        </span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })()}
+
             {/* Quick Stats */}
             <Card>
               <CardHeader>
                 <CardTitle>Project Summary</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="text-center">
-                  <div className="text-3xl font-bold text-primary">{rooms.length}</div>
-                  <div className="text-sm text-muted-foreground">Total Rooms</div>
+              <CardContent>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="text-center p-4 bg-blue-50 rounded-lg">
+                    <div className="text-3xl font-bold text-blue-600">
+                      {rooms.length}
+                    </div>
+                    <div className="text-sm text-muted-foreground mt-1">
+                      Total Rooms
+                    </div>
+                  </div>
+                  <div className="text-center p-4 bg-indigo-50 rounded-lg">
+                    <div className="text-3xl font-bold text-indigo-600">
+                      {getTotalWindows()}
+                    </div>
+                    <div className="text-sm text-muted-foreground mt-1">
+                      Total Windows
+                    </div>
+                  </div>
                 </div>
-                <Separator />
-                <div className="text-center">
-                  <div className="text-3xl font-bold text-primary">{getTotalWindows()}</div>
-                  <div className="text-sm text-muted-foreground">Total Windows</div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Quick Actions */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Quick Actions</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <Button 
-                  className="w-full" 
-                  onClick={() => router.push(`/projects/${projectId}/rooms`)}
-                >
-                  Manage Rooms
-                </Button>
-                <Button 
-                  variant="outline" 
-                  className="w-full"
-                  onClick={() => router.push("/projects")}
-                >
-                  View All Projects
-                </Button>
-                <Button 
-                  variant="outline" 
-                  className="w-full"
-                  onClick={() => router.push("/customers")}
-                >
-                  View Customers
-                </Button>
               </CardContent>
             </Card>
 
@@ -365,26 +625,22 @@ export default function ProjectDetailPage() {
                 <CardTitle>Project Actions</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <Button 
-                  variant="outline" 
+                <Button
                   className="w-full"
-                  disabled
+                  onClick={() => router.push(`/projects/${projectId}/rooms`)}
                 >
+                  Manage Rooms
+                </Button>
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={handleWhatsAppShare}
+                  disabled={!project?.customerId?.contactNumber}
+                >
+                  Share WhatsApp
+                </Button>
+                <Button variant="outline" className="w-full" disabled>
                   Generate PDF (Coming Soon)
-                </Button>
-                <Button 
-                  variant="outline" 
-                  className="w-full"
-                  disabled
-                >
-                  Share WhatsApp (Coming Soon)
-                </Button>
-                <Button 
-                  variant="outline" 
-                  className="w-full"
-                  disabled
-                >
-                  Update Status (Coming Soon)
                 </Button>
               </CardContent>
             </Card>
@@ -394,4 +650,3 @@ export default function ProjectDetailPage() {
     </div>
   );
 }
-

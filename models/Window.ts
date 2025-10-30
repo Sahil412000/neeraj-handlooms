@@ -8,6 +8,10 @@ export interface IWindow extends Document {
   width: number;
   height: number;
   pannaCount: number;
+  meters: number;
+  fabricCostPerMeter: number;
+  trackCount: number;
+  hookCount: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -44,6 +48,22 @@ const WindowSchema = new Schema<IWindow>(
     pannaCount: {
       type: Number,
       default: 6,
+    },
+    meters: {
+      type: Number,
+      required: true,
+    },
+    fabricCostPerMeter: {
+      type: Number,
+      required: true,
+    },
+    trackCount: {
+      type: Number,
+      default: 1,
+    },
+    hookCount: {
+      type: Number,
+      default: 0,
     },
   },
   {

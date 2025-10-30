@@ -61,11 +61,38 @@ interface Project {
   probableDeliveryDate?: string;
   createdAt: string;
   updatedAt: string;
+  defaultMakingRate?: number;
+  defaultFittingRate?: number;
+  defaultTrackRate?: number;
+  defaultHookRate?: number;
+}
+
+interface Window {
+  _id: string;
+  windowNumber: number;
+  style: string;
+  width: number;
+  height: number;
+  pannaCount: number;
+  meters: number;
+  fabricCostPerMeter: number;
+  trackCount: number;
+  hookCount: number;
+}
+
+interface Room {
+  _id: string;
+  projectId: string;
+  roomType: string;
+  windows?: Window[];
 }
 
 export default function ProjectsPage() {
   const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
+  const [projectRooms, setProjectRooms] = useState<{
+    [projectId: string]: Room[];
+  }>({});
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -79,11 +106,11 @@ export default function ProjectsPage() {
     try {
       const token = localStorage.getItem("token");
       const params = new URLSearchParams();
-      
+
       if (statusFilter !== "all") {
         params.append("status", statusFilter);
       }
-      
+
       if (searchQuery.trim()) {
         params.append("search", searchQuery.trim());
       }
@@ -97,6 +124,31 @@ export default function ProjectsPage() {
       if (response.ok) {
         const data = await response.json();
         setProjects(data.projects);
+
+        // Fetch rooms and windows for each project
+        const roomsData: { [projectId: string]: Room[] } = {};
+        for (const project of data.projects) {
+          try {
+            const projectDetailResponse = await fetch(
+              `/api/projects/${project._id}`,
+              {
+                headers: { Authorization: `Bearer ${token}` },
+              }
+            );
+            if (projectDetailResponse.ok) {
+              const projectDetail = await projectDetailResponse.json();
+              if (projectDetail.rooms) {
+                roomsData[project._id] = projectDetail.rooms;
+              }
+            }
+          } catch (error) {
+            console.error(
+              `Failed to fetch rooms for project ${project._id}:`,
+              error
+            );
+          }
+        }
+        setProjectRooms(roomsData);
       }
     } catch (error) {
       console.error("Failed to fetch projects:", error);
@@ -105,7 +157,7 @@ export default function ProjectsPage() {
     }
   };
 
-  const filteredProjects = projects.filter(project => {
+  const filteredProjects = projects.filter((project) => {
     const searchLower = searchQuery.toLowerCase();
     return (
       project.customerId?.name.toLowerCase().includes(searchLower) ||
@@ -167,6 +219,36 @@ export default function ProjectsPage() {
     }).format(amount);
   };
 
+  // Calculate project total from windows
+  const calculateProjectTotal = (project: Project): number => {
+    const rooms = projectRooms[project._id];
+    if (!rooms || rooms.length === 0) return 0;
+
+    let totalCost = 0;
+
+    rooms.forEach((room) => {
+      if (room.windows) {
+        room.windows.forEach((window) => {
+          const fabricCost =
+            (window.meters || 0) * (window.fabricCostPerMeter || 0);
+          const trackCost =
+            (window.trackCount || 0) * (project.defaultTrackRate || 0);
+          const makingCost =
+            (window.pannaCount || 0) * (project.defaultMakingRate || 0);
+          const fittingCost =
+            (window.pannaCount || 0) * (project.defaultFittingRate || 0);
+          const hookCost =
+            (window.hookCount || 0) * (project.defaultHookRate || 0);
+
+          totalCost +=
+            fabricCost + trackCost + makingCost + fittingCost + hookCost;
+        });
+      }
+    });
+
+    return totalCost;
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -217,19 +299,14 @@ export default function ProjectsPage() {
               />
             </div>
             <div className="w-full md:w-64">
-              <Select 
-                value={statusFilter} 
-                onValueChange={setStatusFilter}
-              >
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
                 <SelectTrigger>
                   <SelectValue placeholder="Filter by status" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Status</SelectItem>
                   <SelectItem value="draft">Draft</SelectItem>
-                  <SelectItem value="quotation_sent">
-                    Quotation Sent
-                  </SelectItem>
+                  <SelectItem value="quotation_sent">Quotation Sent</SelectItem>
                   <SelectItem value="confirmed">Confirmed</SelectItem>
                   <SelectItem value="completed">Completed</SelectItem>
                   <SelectItem value="cancelled">Cancelled</SelectItem>
@@ -247,10 +324,9 @@ export default function ProjectsPage() {
           <CardHeader>
             <CardTitle>Projects</CardTitle>
             <CardDescription>
-              {projects.length === 0 
+              {projects.length === 0
                 ? "No projects yet. Add your first project to get started!"
-                : `Showing ${filteredProjects.length} projects`
-              }
+                : `Showing ${filteredProjects.length} projects`}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -286,40 +362,53 @@ export default function ProjectsPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredProjects.map((project) => (
-                      <TableRow key={project._id}>
-                        <TableCell className="font-medium">
-                          {project.quotationNumber}
-                        </TableCell>
-                        <TableCell>
-                          <div className="font-medium">
-                            {project.customerId?.name || "N/A"}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          {project.customerId?.contactNumber}
-                        </TableCell>
-                        <TableCell>{project.projectType}</TableCell>
-                        <TableCell>{project.salesPersonId?.name || "N/A"}</TableCell>
-                        <TableCell>
-                          {project.tailorId?.name || "Not assigned"}
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant="outline"
-                            className={getStatusColor(project.status)}
-                          >
-                            {getStatusLabel(project.status)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right font-medium">
-                          {formatCurrency(project.totalAmount)}
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {formatDate(project.createdAt)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {filteredProjects.map((project) => {
+                      const calculatedTotal = calculateProjectTotal(project);
+                      return (
+                        <TableRow
+                          key={project._id}
+                          className="cursor-pointer hover:bg-muted/50"
+                          onClick={() =>
+                            router.push(`/projects/${project._id}`)
+                          }
+                        >
+                          <TableCell className="font-medium">
+                            {project.quotationNumber}
+                          </TableCell>
+                          <TableCell>
+                            <div className="font-medium">
+                              {project.customerId?.name || "N/A"}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            {project.customerId?.contactNumber}
+                          </TableCell>
+                          <TableCell>{project.projectType}</TableCell>
+                          <TableCell>
+                            {project.salesPersonId?.name || "N/A"}
+                          </TableCell>
+                          <TableCell>
+                            {project.tailorId?.name || "Not assigned"}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant="outline"
+                              className={getStatusColor(project.status)}
+                            >
+                              {getStatusLabel(project.status)}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="font-bold text-green-600">
+                              {formatCurrency(calculatedTotal)}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {formatDate(project.createdAt)}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>

@@ -69,6 +69,30 @@ interface Project {
   probableDeliveryDate?: string;
   createdAt: string;
   updatedAt: string;
+  defaultMakingRate?: number;
+  defaultFittingRate?: number;
+  defaultTrackRate?: number;
+  defaultHookRate?: number;
+}
+
+interface Window {
+  _id: string;
+  windowNumber: number;
+  style: string;
+  width: number;
+  height: number;
+  pannaCount: number;
+  meters: number;
+  fabricCostPerMeter: number;
+  trackCount: number;
+  hookCount: number;
+}
+
+interface Room {
+  _id: string;
+  projectId: string;
+  roomType: string;
+  windows?: Window[];
 }
 
 interface ProjectStats {
@@ -83,6 +107,9 @@ export default function DashboardPage() {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [projectRooms, setProjectRooms] = useState<{
+    [projectId: string]: Room[];
+  }>({});
   const [tailors, setTailors] = useState<Tailor[]>([]);
   const [salesPersons, setSalesPersons] = useState<SalesPerson[]>([]);
   const [stats, setStats] = useState<ProjectStats>({
@@ -141,22 +168,23 @@ export default function DashboardPage() {
     const fetchData = async () => {
       setIsLoading(true);
       try {
-        const [projectsResponse, tailorsResponse, salesPersonsResponse] = await Promise.all([
-          fetch("/api/projects", {
-            headers: { Authorization: `Bearer ${token}` },
-          }),
-          fetch("/api/tailors", {
-            headers: { Authorization: `Bearer ${token}` },
-          }),
-          fetch("/api/sales-persons", {
-            headers: { Authorization: `Bearer ${token}` },
-          }),
-        ]);
+        const [projectsResponse, tailorsResponse, salesPersonsResponse] =
+          await Promise.all([
+            fetch("/api/projects", {
+              headers: { Authorization: `Bearer ${token}` },
+            }),
+            fetch("/api/tailors", {
+              headers: { Authorization: `Bearer ${token}` },
+            }),
+            fetch("/api/sales-persons", {
+              headers: { Authorization: `Bearer ${token}` },
+            }),
+          ]);
 
         if (projectsResponse.ok) {
           const data = await projectsResponse.json();
           setProjects(data.projects);
-          
+
           // Calculate stats
           const projectStats = data.projects.reduce(
             (acc: ProjectStats, project: Project) => {
@@ -170,6 +198,31 @@ export default function DashboardPage() {
             { total: 0, draft: 0, quotationSent: 0, confirmed: 0, completed: 0 }
           );
           setStats(projectStats);
+
+          // Fetch rooms and windows for each project
+          const roomsData: { [projectId: string]: Room[] } = {};
+          for (const project of data.projects.slice(0, 5)) {
+            try {
+              const projectDetailResponse = await fetch(
+                `/api/projects/${project._id}`,
+                {
+                  headers: { Authorization: `Bearer ${token}` },
+                }
+              );
+              if (projectDetailResponse.ok) {
+                const projectDetail = await projectDetailResponse.json();
+                if (projectDetail.rooms) {
+                  roomsData[project._id] = projectDetail.rooms;
+                }
+              }
+            } catch (error) {
+              console.error(
+                `Failed to fetch rooms for project ${project._id}:`,
+                error
+              );
+            }
+          }
+          setProjectRooms(roomsData);
         }
 
         if (tailorsResponse.ok) {
@@ -183,9 +236,9 @@ export default function DashboardPage() {
         }
       } catch (error) {
         console.error("Failed to fetch data:", error);
-    } finally {
-      setIsLoading(false);
-    }
+      } finally {
+        setIsLoading(false);
+      }
     };
 
     fetchData();
@@ -197,20 +250,24 @@ export default function DashboardPage() {
     router.push("/login");
   };
 
-  const handleTailorFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleTailorFormChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+  ) => {
     const { name, value } = e.target;
-    setTailorForm(prev => ({ ...prev, [name]: value }));
+    setTailorForm((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleSalesPersonFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleSalesPersonFormChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+  ) => {
     const { name, value } = e.target;
-    setSalesPersonForm(prev => ({ ...prev, [name]: value }));
+    setSalesPersonForm((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleCreateTailor = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsCreatingTailor(true);
-    
+
     try {
       const token = localStorage.getItem("token");
       const response = await fetch("/api/tailors", {
@@ -224,7 +281,7 @@ export default function DashboardPage() {
 
       if (response.ok) {
         const data = await response.json();
-        setTailors(prev => [...prev, data.tailor]);
+        setTailors((prev) => [...prev, data.tailor]);
         setTailorForm({
           name: "",
           contactNumber: "",
@@ -247,7 +304,7 @@ export default function DashboardPage() {
   const handleCreateSalesPerson = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsCreatingSalesPerson(true);
-    
+
     try {
       const token = localStorage.getItem("token");
       const response = await fetch("/api/sales-persons", {
@@ -261,7 +318,7 @@ export default function DashboardPage() {
 
       if (response.ok) {
         const data = await response.json();
-        setSalesPersons(prev => [...prev, data.salesPerson]);
+        setSalesPersons((prev) => [...prev, data.salesPerson]);
         setSalesPersonForm({
           name: "",
           contactNumber: "",
@@ -332,6 +389,46 @@ export default function DashboardPage() {
     }).format(amount);
   };
 
+  // Calculate project total from windows
+  const calculateProjectTotal = (project: Project): number => {
+    const rooms = projectRooms[project._id];
+    if (!rooms || rooms.length === 0) return 0;
+
+    let totalCost = 0;
+
+    rooms.forEach((room) => {
+      if (room.windows) {
+        room.windows.forEach((window) => {
+          const fabricCost =
+            (window.meters || 0) * (window.fabricCostPerMeter || 0);
+          const trackCost =
+            (window.trackCount || 0) * (project.defaultTrackRate || 0);
+          const makingCost =
+            (window.pannaCount || 0) * (project.defaultMakingRate || 0);
+          const fittingCost =
+            (window.pannaCount || 0) * (project.defaultFittingRate || 0);
+          const hookCost =
+            (window.hookCount || 0) * (project.defaultHookRate || 0);
+
+          totalCost +=
+            fabricCost + trackCost + makingCost + fittingCost + hookCost;
+        });
+      }
+    });
+
+    return totalCost;
+  };
+
+  // Calculate total windows in a project
+  const getTotalWindows = (projectId: string): number => {
+    const rooms = projectRooms[projectId];
+    if (!rooms) return 0;
+    return rooms.reduce(
+      (total, room) => total + (room.windows?.length || 0),
+      0
+    );
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -366,7 +463,7 @@ export default function DashboardPage() {
                 {user?.role}
               </Badge>
               <Button variant="destructive" onClick={handleLogout}>
-              Logout
+                Logout
               </Button>
             </div>
           </div>
@@ -383,12 +480,14 @@ export default function DashboardPage() {
                 <CardTitle className="text-sm font-medium">
                   Active Projects
                 </CardTitle>
-                    <div className="w-8 h-8 bg-blue-500 rounded-md flex items-center justify-center">
+                <div className="w-8 h-8 bg-blue-500 rounded-md flex items-center justify-center">
                   <span className="text-white font-bold text-sm">P</span>
-                    </div>
+                </div>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{stats.draft + stats.confirmed}</div>
+                <div className="text-2xl font-bold">
+                  {stats.draft + stats.confirmed}
+                </div>
                 <p className="text-xs text-muted-foreground mt-1">
                   {stats.draft + stats.confirmed === 0
                     ? "No active projects yet"
@@ -404,10 +503,12 @@ export default function DashboardPage() {
                 </CardTitle>
                 <div className="w-8 h-8 bg-green-500 rounded-md flex items-center justify-center">
                   <span className="text-white font-bold text-sm">Q</span>
-                  </div>
+                </div>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{stats.draft + stats.quotationSent}</div>
+                <div className="text-2xl font-bold">
+                  {stats.draft + stats.quotationSent}
+                </div>
                 <p className="text-xs text-muted-foreground mt-1">
                   {stats.draft + stats.quotationSent === 0
                     ? "Ready to create your first quote"
@@ -467,21 +568,24 @@ export default function DashboardPage() {
                 >
                   View Customers
                 </Button>
-            </div>
+              </div>
 
               {/* Team Management */}
               <div className="mt-6">
                 <h3 className="text-lg font-semibold mb-4">Team Management</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Dialog open={isTailorModalOpen} onOpenChange={setIsTailorModalOpen}>
+                  <Dialog
+                    open={isTailorModalOpen}
+                    onOpenChange={setIsTailorModalOpen}
+                  >
                     <DialogTrigger asChild>
                       <Button className="h-auto py-4" variant="outline">
                         <div className="text-center">
                           <div className="font-semibold">Add Tailor</div>
                           <div className="text-sm text-muted-foreground">
                             {tailors.length} tailors registered
-                    </div>
-                  </div>
+                          </div>
+                        </div>
                       </Button>
                     </DialogTrigger>
                     <DialogContent className="max-w-md">
@@ -504,7 +608,9 @@ export default function DashboardPage() {
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="tailorContact">Contact Number *</Label>
+                          <Label htmlFor="tailorContact">
+                            Contact Number *
+                          </Label>
                           <Input
                             id="tailorContact"
                             name="contactNumber"
@@ -513,9 +619,11 @@ export default function DashboardPage() {
                             placeholder="10-digit number"
                             required
                           />
-                  </div>
+                        </div>
                         <div className="space-y-2">
-                          <Label htmlFor="tailorSpecialization">Specialization</Label>
+                          <Label htmlFor="tailorSpecialization">
+                            Specialization
+                          </Label>
                           <Input
                             id="tailorSpecialization"
                             name="specialization"
@@ -523,7 +631,7 @@ export default function DashboardPage() {
                             onChange={handleTailorFormChange}
                             placeholder="e.g., Curtains, Blinds"
                           />
-                </div>
+                        </div>
                         <div className="space-y-2">
                           <Label htmlFor="tailorAddress">Address</Label>
                           <Textarea
@@ -534,7 +642,7 @@ export default function DashboardPage() {
                             placeholder="Optional address"
                             rows={2}
                           />
-              </div>
+                        </div>
                         <div className="flex gap-2">
                           <Button
                             type="button"
@@ -544,23 +652,30 @@ export default function DashboardPage() {
                           >
                             Cancel
                           </Button>
-                          <Button type="submit" disabled={isCreatingTailor} className="flex-1">
+                          <Button
+                            type="submit"
+                            disabled={isCreatingTailor}
+                            className="flex-1"
+                          >
                             {isCreatingTailor ? "Adding..." : "Add Tailor"}
                           </Button>
-            </div>
+                        </div>
                       </form>
                     </DialogContent>
                   </Dialog>
 
-                  <Dialog open={isSalesPersonModalOpen} onOpenChange={setIsSalesPersonModalOpen}>
+                  <Dialog
+                    open={isSalesPersonModalOpen}
+                    onOpenChange={setIsSalesPersonModalOpen}
+                  >
                     <DialogTrigger asChild>
                       <Button className="h-auto py-4" variant="outline">
                         <div className="text-center">
                           <div className="font-semibold">Add Sales Person</div>
                           <div className="text-sm text-muted-foreground">
                             {salesPersons.length} sales persons registered
-                    </div>
-                  </div>
+                          </div>
+                        </div>
                       </Button>
                     </DialogTrigger>
                     <DialogContent className="max-w-md">
@@ -570,7 +685,10 @@ export default function DashboardPage() {
                           Add a new sales person to your team
                         </DialogDescription>
                       </DialogHeader>
-                      <form onSubmit={handleCreateSalesPerson} className="space-y-4">
+                      <form
+                        onSubmit={handleCreateSalesPerson}
+                        className="space-y-4"
+                      >
                         <div className="space-y-2">
                           <Label htmlFor="salesPersonName">Name *</Label>
                           <Input
@@ -583,7 +701,9 @@ export default function DashboardPage() {
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="salesPersonContact">Contact Number *</Label>
+                          <Label htmlFor="salesPersonContact">
+                            Contact Number *
+                          </Label>
                           <Input
                             id="salesPersonContact"
                             name="contactNumber"
@@ -594,7 +714,9 @@ export default function DashboardPage() {
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="salesPersonTerritory">Territory</Label>
+                          <Label htmlFor="salesPersonTerritory">
+                            Territory
+                          </Label>
                           <Input
                             id="salesPersonTerritory"
                             name="territory"
@@ -623,10 +745,16 @@ export default function DashboardPage() {
                           >
                             Cancel
                           </Button>
-                          <Button type="submit" disabled={isCreatingSalesPerson} className="flex-1">
-                            {isCreatingSalesPerson ? "Adding..." : "Add Sales Person"}
+                          <Button
+                            type="submit"
+                            disabled={isCreatingSalesPerson}
+                            className="flex-1"
+                          >
+                            {isCreatingSalesPerson
+                              ? "Adding..."
+                              : "Add Sales Person"}
                           </Button>
-                  </div>
+                        </div>
                       </form>
                     </DialogContent>
                   </Dialog>
@@ -672,68 +800,86 @@ export default function DashboardPage() {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {projects.slice(0, 5).map((project) => (
-                    <div
-                      key={project._id}
-                      className="border rounded-lg p-4 hover:bg-accent/50 transition-colors cursor-pointer"
-                      onClick={() => router.push(`/projects/${project._id}`)}
-                    >
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
-                            <h3 className="font-semibold text-lg">
-                              {project.quotationNumber}
-                            </h3>
-                            <Badge
-                              variant="outline"
-                              className={getStatusColor(project.status)}
-                            >
-                              {getStatusLabel(project.status)}
-                            </Badge>
-                          </div>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-muted-foreground">
-                            <div>
-                              <span className="font-medium">Customer:</span>{" "}
-                              {project.customerId?.name || "N/A"}
+                  {projects.slice(0, 5).map((project) => {
+                    const calculatedTotal = calculateProjectTotal(project);
+                    const totalWindows = getTotalWindows(project._id);
+                    const totalRooms = projectRooms[project._id]?.length || 0;
+
+                    return (
+                      <div
+                        key={project._id}
+                        className="border rounded-lg p-4 hover:bg-accent/50 transition-colors cursor-pointer"
+                        onClick={() => router.push(`/projects/${project._id}`)}
+                      >
+                        <div className="flex justify-between items-start">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-2">
+                              <h3 className="font-semibold text-lg">
+                                {project.quotationNumber}
+                              </h3>
+                              <Badge
+                                variant="outline"
+                                className={getStatusColor(project.status)}
+                              >
+                                {getStatusLabel(project.status)}
+                              </Badge>
                             </div>
-                            <div>
-                              <span className="font-medium">Contact:</span>{" "}
-                              {project.customerId?.contactNumber || "N/A"}
-                            </div>
-                            <div>
-                              <span className="font-medium">Project Type:</span>{" "}
-                              {project.projectType}
-                            </div>
-                            <div>
-                              <span className="font-medium">Sales Person:</span>{" "}
-                              {project.salesPersonId?.name || "N/A"}
-                            </div>
-                            {project.tailorId && (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-muted-foreground">
                               <div>
-                                <span className="font-medium">Tailor:</span>{" "}
-                                {project.tailorId.name}
+                                <span className="font-medium">Customer:</span>{" "}
+                                {project.customerId?.name || "N/A"}
+                              </div>
+                              <div>
+                                <span className="font-medium">Contact:</span>{" "}
+                                {project.customerId?.contactNumber || "N/A"}
+                              </div>
+                              <div>
+                                <span className="font-medium">
+                                  Project Type:
+                                </span>{" "}
+                                {project.projectType}
+                              </div>
+                              <div>
+                                <span className="font-medium">
+                                  Sales Person:
+                                </span>{" "}
+                                {project.salesPersonId?.name || "N/A"}
+                              </div>
+                              {project.tailorId && (
+                                <div>
+                                  <span className="font-medium">Tailor:</span>{" "}
+                                  {project.tailorId.name}
+                                </div>
+                              )}
+                              <div>
+                                <span className="font-medium">Created:</span>{" "}
+                                {formatDate(project.createdAt)}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-right ml-4">
+                            <div className="font-bold text-lg text-green-600">
+                              {formatCurrency(calculatedTotal)}
+                            </div>
+                            <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
+                              <div>
+                                {totalRooms} Room{totalRooms !== 1 ? "s" : ""}
+                              </div>
+                              <div>
+                                {totalWindows} Window
+                                {totalWindows !== 1 ? "s" : ""}
+                              </div>
+                            </div>
+                            {calculatedTotal === 0 && totalRooms === 0 && (
+                              <div className="text-xs text-orange-600 mt-2">
+                                No rooms added yet
                               </div>
                             )}
-                            <div>
-                              <span className="font-medium">Created:</span>{" "}
-                              {formatDate(project.createdAt)}
-                            </div>
                           </div>
                         </div>
-                        <div className="text-right ml-4">
-                          <div className="font-bold text-lg">
-                            {formatCurrency(project.totalAmount)}
-                          </div>
-                          {project.totalAmount > 0 && (
-                            <div className="text-xs text-muted-foreground">
-                              <div>Advance: {formatCurrency(project.advanceAmount)}</div>
-                              <div>Balance: {formatCurrency(project.balanceAmount)}</div>
-                            </div>
-                          )}
-              </div>
-            </div>
-          </div>
-                  ))}
+                      </div>
+                    );
+                  })}
                   {projects.length > 5 && (
                     <Button
                       variant="outline"
